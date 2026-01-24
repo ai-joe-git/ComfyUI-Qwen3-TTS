@@ -75,7 +75,7 @@ cd ComfyUI-Qwen3-TTS
 pip install -r requirements.txt
 ```
 
-### Method 3: Git Submodule
+### Method 2: Git Submodule
 
 If your ComfyUI is a git repository:
 
