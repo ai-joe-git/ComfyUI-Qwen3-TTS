@@ -61,7 +61,11 @@ MODEL_FAMILY_TO_HF = {
 # All required models for batch download
 ALL_MODELS = [
     "Qwen/Qwen3-TTS-Tokenizer-12Hz",
-    "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 ]
 
 _MODELS_CHECKED = False
