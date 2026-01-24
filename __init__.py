@@ -17,7 +17,7 @@ from .nodes import (
     CustomVoiceNode,
 )
 
-#NODE_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "Qwen3TTSVoiceClone": VoiceCloneNode,
     "Qwen3TTSVoiceDesign": VoiceDesignNode,
     "Qwen3TTSCustomVoice": CustomVoiceNode,
