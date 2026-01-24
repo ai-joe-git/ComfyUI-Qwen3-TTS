@@ -1,45 +1,15 @@
 [project]
 name = "comfyui-qwen3-tts"
-description = "High-quality Text-to-Speech nodes for ComfyUI using Qwen3-TTS models. Supports voice cloning, voice design, and custom voices."
+description = "High-quality Text-to-Speech nodes for ComfyUI using Qwen3-TTS models. Supports voice cloning, voice design, and custom voices with Intel Arc XPU optimization."
 version = "1.1.0"
-license = { text = "MIT" }
-dependencies = [
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
-    "transformers>=4.30.0",
-    "librosa>=0.10.0",
-    "soundfile>=0.12.0",
-    "accelerate>=0.20.0",
-    "numpy>=1.24.0",
-    "einops>=0.6.0",
-    "tiktoken>=0.5.0",
-    "sentencepiece>=0.1.99",
-    "huggingface-hub>=0.16.0"
-]
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+dependencies = []
 
 [project.urls]
 Repository = "https://github.com/ai-joe-git/ComfyUI-Qwen3-TTS"
-Homepage = "https://github.com/ai-joe-git/ComfyUI-Qwen3-TTS"
 
 [tool.comfy]
 PublisherId = "ai-joe-git"
 DisplayName = "ComfyUI-Qwen3-TTS"
 Icon = ""
-
-[[tool.comfy.node]]
-name = "Qwen3TTSVoiceClone"
-display_name = "🎭 Qwen3-TTS VoiceClone"
-category = "audio/tts"
-description = "Clone voices from reference audio and synthesize new speech"
-
-[[tool.comfy.node]]
-name = "Qwen3TTSVoiceDesign"
-display_name = "🎨 Qwen3-TTS VoiceDesign"
-category = "audio/tts"
-description = "Create custom voices from text descriptions"
-
-[[tool.comfy.node]]
-name = "Qwen3TTSCustomVoice"
-display_name = "🎵 Qwen3-TTS CustomVoice"
-category = "audio/tts"
-description = "Generate speech using preset high-quality voices"
