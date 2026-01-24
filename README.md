@@ -66,14 +66,7 @@ Use preset high-quality voices:
 
 ## 📦 Installation
 
-### Method 1: ComfyUI Manager (Recommended)
-
-1. Open ComfyUI Manager
-2. Search for "Qwen3-TTS"
-3. Click Install
-4. Restart ComfyUI
-
-### Method 2: Manual Installation
+### Method 1: Manual Installation
 
 ```bash
 cd ComfyUI/custom_nodes/
