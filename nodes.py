@@ -165,6 +165,32 @@ def load_qwen_model(model_type: str, model_choice: str, device: str, precision: 
         else:
             device = "cpu"
     
+    # === CPU OPTIMIZATION - SET THREADS ONLY ONCE ===
+    if device == "cpu":
+        # Use a global flag to set threads only on first call
+        global _CPU_THREADS_SET
+        if '_CPU_THREADS_SET' not in globals():
+            _CPU_THREADS_SET = False
+        
+        if not _CPU_THREADS_SET:
+            cpu_cores = os.cpu_count() or 8
+            print(f"🔧 [Qwen3-TTS] Detected {cpu_cores} CPU cores - enabling full CPU utilization")
+            
+            # Configure PyTorch to use ALL CPU threads (ONCE!)
+            torch.set_num_threads(cpu_cores)
+            torch.set_num_interop_threads(cpu_cores)
+            print(f"✅ [Qwen3-TTS] PyTorch configured to use all {cpu_cores} threads")
+            
+            # Set environment variables for maximum CPU performance
+            os.environ["OMP_NUM_THREADS"] = str(cpu_cores)
+            os.environ["MKL_NUM_THREADS"] = str(cpu_cores)
+            os.environ["NUMEXPR_NUM_THREADS"] = str(cpu_cores)
+            
+            _CPU_THREADS_SET = True
+    # === END CPU OPTIMIZATION ===
+
+
+
     # 强制 Mac 使用 float16 或 bfloat16 (MPS 跑 float32 会很慢)
     if device == "mps" and precision == "bf16":
         dtype = torch.bfloat16
