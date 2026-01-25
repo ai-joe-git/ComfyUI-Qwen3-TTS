@@ -1,7 +1,7 @@
 [project]
-name = "comfyui-qwen3-tts"
+name = "comfyui-simple-qwen3-tts"
 description = "High-quality Text-to-Speech nodes for ComfyUI using Qwen3-TTS models. Supports voice cloning, voice design, and custom voices with Intel Arc XPU optimization."
-version = "1.1.0"
+version = "1.0.0"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 dependencies = []
@@ -11,5 +11,5 @@ Repository = "https://github.com/ai-joe-git/ComfyUI-Qwen3-TTS"
 
 [tool.comfy]
 PublisherId = "ai-joe-git"
-DisplayName = "ComfyUI-Qwen3-TTS"
+DisplayName = "Simple Qwen3-TTS"
 Icon = ""
