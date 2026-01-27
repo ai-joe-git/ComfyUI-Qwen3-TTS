@@ -1,4 +1,5 @@
 # ComfyUI-Qwen3-TTS Custom Nodes
+
 # Based on the open-source Qwen3-TTS project by Alibaba Qwen team
 
 import os
@@ -31,7 +32,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 }
 
 # Version information
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # Web directory for custom UI components (if any)
 WEB_DIRECTORY = "./web"
