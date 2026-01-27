@@ -18,11 +18,8 @@ except ImportError:
     IPEX_AVAILABLE = False
     # Silently continue - IPEX is optional
 
-
-
-# Common languages list for UI
+# Common languages list for UI (Auto removed - manual selection only)
 DEMO_LANGUAGES = [
-    "Auto",
     "Chinese",
     "English",
     "Japanese",
@@ -37,7 +34,6 @@ DEMO_LANGUAGES = [
 
 # Language mapping dictionary to engine codes
 LANGUAGE_MAP = {
-    "Auto": "auto",
     "Chinese": "chinese",
     "English": "english",
     "Japanese": "japanese",
@@ -52,6 +48,7 @@ LANGUAGE_MAP = {
 
 # Model family options for UI (0.6B / 1.7B)
 MODEL_FAMILIES = ["0.6B", "1.7B"]
+
 # Mapping of family to default HuggingFace repo ID
 MODEL_FAMILY_TO_HF = {
     "0.6B": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
@@ -102,10 +99,8 @@ except ImportError:
             print("   Traceback for debugging:")
             traceback.print_exc()
             print("\n   Common fix: run 'pip install -r requirements.txt' in your ComfyUI environment.")
-        
         Qwen3TTSModel = None
         VoiceClonePromptItem = None
-
 
 # Global model cache
 _MODEL_CACHE = {}
@@ -116,8 +111,9 @@ def check_and_download_models():
     global _MODELS_CHECKED
     if _MODELS_CHECKED:
         return
-    
+
     current_dir = os.path.dirname(os.path.abspath(__file__))
+
     # ComfyUI root search
     comfy_models_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "models")
     qwen_root = os.path.join(comfy_models_path, "qwen-tts")
@@ -125,12 +121,11 @@ def check_and_download_models():
 
     # Check if any model directory looks like it was downloaded
     local_dirs = os.listdir(qwen_root) if os.path.exists(qwen_root) else []
-    
+
     # If the folder is empty or has only trivial files, trigger download
     if not any(os.path.isdir(os.path.join(qwen_root, d)) for d in local_dirs):
         print("\n📥 [Qwen3-TTS] First run detected. Models are missing in 'models/qwen-tts'.")
         print("   Starting batch download of all models (approx. 6GB). This may take several minutes...")
-        
         try:
             from huggingface_hub import snapshot_download
             for model_id in ALL_MODELS:
@@ -144,76 +139,91 @@ def check_and_download_models():
             print("⚠️ [Qwen3-TTS] 'huggingface_hub' not found. Please install it to use auto-download.")
         except Exception as e:
             print(f"❌ [Qwen3-TTS] Failed to download models: {e}")
-    
+
     _MODELS_CHECKED = True
 
-def load_qwen_model(model_type: str, model_choice: str, device: str, precision: str):
-    """Shared model loading logic with caching and local path priority"""
+
+def load_qwen_model(model_type: str, model_choice: str, device: str, precision: str, language: str = "english"):
+    """Shared model loading logic with caching and local path priority
+
+    Args:
+        model_type: Type of model (VoiceDesign, CustomVoice, Base)
+        model_choice: Model size (0.6B, 1.7B)
+        device: Device to load model on (auto, cuda, mps, xpu, cpu)
+        precision: Precision (bf16, fp32)
+        language: Target language for generation (included in cache key)
+    """
     global _MODEL_CACHE
-    
+
     # Check and trigger download on first run
     check_and_download_models()
-    
+
     # Determine device
     if device == "auto":
         if torch.cuda.is_available():
             device = "cuda"
         elif torch.backends.mps.is_available():
-            device = "mps"  # 针对 Mac 的关键修复
+            device = "mps"  # Mac support
         elif hasattr(torch, 'xpu') and torch.xpu.is_available():
-            device = "xpu" # Intel Arc GPU support
+            device = "xpu"  # Intel Arc GPU support
         else:
             device = "cpu"
-    
+
     # === CPU OPTIMIZATION - SET THREADS ONLY ONCE ===
     if device == "cpu":
         # Use a global flag to set threads only on first call
         global _CPU_THREADS_SET
         if '_CPU_THREADS_SET' not in globals():
             _CPU_THREADS_SET = False
-        
+
         if not _CPU_THREADS_SET:
             cpu_cores = os.cpu_count() or 8
             print(f"🔧 [Qwen3-TTS] Detected {cpu_cores} CPU cores - enabling full CPU utilization")
-            
+
             # Configure PyTorch to use ALL CPU threads (ONCE!)
             torch.set_num_threads(cpu_cores)
             torch.set_num_interop_threads(cpu_cores)
             print(f"✅ [Qwen3-TTS] PyTorch configured to use all {cpu_cores} threads")
-            
+
             # Set environment variables for maximum CPU performance
             os.environ["OMP_NUM_THREADS"] = str(cpu_cores)
             os.environ["MKL_NUM_THREADS"] = str(cpu_cores)
             os.environ["NUMEXPR_NUM_THREADS"] = str(cpu_cores)
-            
             _CPU_THREADS_SET = True
     # === END CPU OPTIMIZATION ===
 
-
-
-    # 强制 Mac 使用 float16 或 bfloat16 (MPS 跑 float32 会很慢)
+    # Force Mac to use float16 or bfloat16 (MPS with float32 is slow)
     if device == "mps" and precision == "bf16":
         dtype = torch.bfloat16
     elif device == "mps":
         dtype = torch.float16
     else:
         dtype = torch.bfloat16 if precision == "bf16" else torch.float32
-    
-    # Set precision
-    dtype = torch.bfloat16 if precision == "bf16" else torch.float32
-    
+
     # VoiceDesign restriction
     if model_type == "VoiceDesign" and model_choice == "0.6B":
         raise RuntimeError("❌ VoiceDesign only supports 1.7B models!")
-        
-    # Cache key
-    cache_key = (model_type, model_choice, device, precision)
+
+    # === SOLUTION 2: Include language in cache key ===
+    cache_key = (model_type, model_choice, device, precision, language)
+
     if cache_key in _MODEL_CACHE:
+        print(f"♻️ [Qwen3-TTS] Using cached model for {model_type} {model_choice} ({language})")
         return _MODEL_CACHE[cache_key]
-    
-    # Clear old cache
-    _MODEL_CACHE.clear()
-    
+
+    # Clear cache entries with same model config but different language
+    # This ensures language changes trigger fresh model initialization
+    keys_to_remove = []
+    for key in _MODEL_CACHE.keys():
+        # Check if it's the same model configuration but different language
+        if key[:4] == (model_type, model_choice, device, precision) and key[4] != language:
+            keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        print(f"🗑️ [Qwen3-TTS] Clearing cached model for language '{key[4]}' to load '{language}'")
+        del _MODEL_CACHE[key]
+    # === END SOLUTION 2 ===
+
     # --- 1. Determine search directories ---
     base_paths = []
     try:
@@ -231,13 +241,14 @@ def load_qwen_model(model_type: str, model_choice: str, device: str, precision: 
                 base_paths.append(alt_qwen_tts_dir)
     except Exception:
         pass
-    
+
     # Check registered TTS paths in folder_paths
     try:
         registered_tts = folder_paths.get_folder_paths("TTS") or []
         for p in registered_tts:
             if p not in base_paths: base_paths.append(p)
-    except Exception: pass
+    except Exception:
+        pass
 
     # --- 2. Search for matching models ---
     HF_MODEL_MAP = {
@@ -247,10 +258,10 @@ def load_qwen_model(model_type: str, model_choice: str, device: str, precision: 
         ("CustomVoice", "0.6B"): "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
         ("CustomVoice", "1.7B"): "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     }
-    
+
     final_source = HF_MODEL_MAP.get((model_type, model_choice)) or "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
     found_local = None
-    
+
     for base in base_paths:
         try:
             if not os.path.isdir(base): continue
@@ -263,13 +274,14 @@ def load_qwen_model(model_type: str, model_choice: str, device: str, precision: 
                         found_local = cand
                         break
             if found_local: break
-        except Exception: pass
-    
+        except Exception:
+            pass
+
     if found_local:
         final_source = found_local
-        print(f"✅ [Qwen3-TTS] Loading local model: {os.path.basename(final_source)}")
+        print(f"✅ [Qwen3-TTS] Loading local model: {os.path.basename(final_source)} (language: {language})")
     else:
-        print(f"🌐 [Qwen3-TTS] Loading remote model: {final_source}")
+        print(f"🌐 [Qwen3-TTS] Loading remote model: {final_source} (language: {language})")
 
     if Qwen3TTSModel is None:
         raise RuntimeError(
@@ -284,9 +296,10 @@ def load_qwen_model(model_type: str, model_choice: str, device: str, precision: 
         # flash_attention_2 not available or not supported, use default attention
         print(f"⚠️ [Qwen3-TTS] flash_attention_2 not available, using default attention: {e}")
         model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype)
-    
+
     _MODEL_CACHE[cache_key] = model
     return model
+
 
 class VoiceDesignNode:
     """
@@ -302,7 +315,7 @@ class VoiceDesignNode:
                 "model_choice": (["1.7B"], {"default": "1.7B", "tooltip": "VoiceDesign only supports 1.7B models"}),
                 "device": (["auto", "cuda", "mps", "xpu", "cpu"], {"default": "auto"}),
                 "precision": (["bf16", "fp32"], {"default": "bf16"}),
-                "language": (DEMO_LANGUAGES, {"default": "Auto"}),
+                "language": (DEMO_LANGUAGES, {"default": "English"}),
             },
             "optional": {
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
@@ -320,20 +333,22 @@ class VoiceDesignNode:
         if not text or not instruct:
             raise RuntimeError("Text and instruction description are required")
 
-        # Load model
-        model = load_qwen_model("VoiceDesign", model_choice, device, precision)
+        # Map language before loading model
+        mapped_lang = LANGUAGE_MAP.get(language, "english")
+
+        # Load model with language parameter (SOLUTION 2)
+        model = load_qwen_model("VoiceDesign", model_choice, device, precision, mapped_lang)
 
         # Set random seeds
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-            if hasattr(torch, 'xpu') and torch.xpu.is_available():
-                torch.xpu.manual_seed_all(seed)
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            torch.xpu.manual_seed_all(seed)
         import numpy as np
         np.random.seed(seed % (2**32))
 
         # Perform generation
-        mapped_lang = LANGUAGE_MAP.get(language, "auto")
         wavs, sr = model.generate_voice_design(
             text=text,
             language=mapped_lang,
@@ -348,6 +363,7 @@ class VoiceDesignNode:
             waveform = waveform.unsqueeze(0).unsqueeze(0)
             audio_data = {"waveform": waveform, "sample_rate": sr}
             return (audio_data,)
+
         raise RuntimeError("Invalid audio data generated")
 
 
@@ -366,7 +382,7 @@ class VoiceCloneNode:
                 "model_choice": (["0.6B", "1.7B"], {"default": "0.6B"}),
                 "device": (["auto", "cuda", "mps", "xpu", "cpu"], {"default": "auto"}),
                 "precision": (["bf16", "fp32"], {"default": "bf16"}),
-                "language": (DEMO_LANGUAGES, {"default": "Auto"}),
+                "language": (DEMO_LANGUAGES, {"default": "English"}),
             },
             "optional": {
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
@@ -385,6 +401,7 @@ class VoiceCloneNode:
         # Accept multiple possible ComfyUI audio formats
         waveform = None
         sr = None
+
         try:
             if isinstance(audio_tensor, dict):
                 # Common keys: 'waveform'/'sample_rate' or 'data'/'sampling_rate'
@@ -422,37 +439,40 @@ class VoiceCloneNode:
                     sr = int(audio_tensor[1])
         except Exception:
             pass
+
         # Normalize to 1-D numpy float32 array (model expects 1-D waveforms)
         if isinstance(waveform, torch.Tensor):
             # ComfyUI audio is often [batch, channels, samples] or [channels, samples]
             if waveform.dim() > 1:
                 # Squeeze out any unit dimensions (like batch=1, channel=1)
                 waveform = waveform.squeeze()
-                # If still multi-dimensional (e.g. stereo), average to mono
-                if waveform.dim() > 1:
-                    waveform = torch.mean(waveform, dim=0)
+
+            # If still multi-dimensional (e.g. stereo), average to mono
+            if waveform.dim() > 1:
+                waveform = torch.mean(waveform, dim=0)
+
             waveform = waveform.cpu().numpy()
 
         if isinstance(waveform, np.ndarray):
             # Double check for numpy version of same logic
             if waveform.ndim > 1:
                 waveform = np.squeeze(waveform)
-                if waveform.ndim > 1:
-                    # Heuristic: the smaller dimension is likely channels
-                    if waveform.shape[0] < waveform.shape[1]:
-                        waveform = np.mean(waveform, axis=0)
-                    else:
-                        waveform = np.mean(waveform, axis=1)
+            if waveform.ndim > 1:
+                # Heuristic: the smaller dimension is likely channels
+                if waveform.shape[0] < waveform.shape[1]:
+                    waveform = np.mean(waveform, axis=0)
+                else:
+                    waveform = np.mean(waveform, axis=1)
             waveform = waveform.astype(np.float32)
 
-        # Final safety flatten to ensure it's 1-D
+        # Final safety: flatten to ensure it's 1-D
         if waveform is not None and waveform.ndim > 1:
             waveform = waveform.flatten()
 
         # Basic validation
         if waveform is None or not isinstance(waveform, np.ndarray) or waveform.size == 0:
             raise RuntimeError("Failed to parse reference audio waveform")
-        
+
         min_samples = 1024
         if waveform.size < min_samples:
             # Pad with zeros to avoid upstream padding errors
@@ -466,19 +486,22 @@ class VoiceCloneNode:
     def generate(self, ref_audio: Dict[str, Any], ref_text: str, target_text: str, model_choice: str, device: str, precision: str, language: str, seed: int = 0, x_vector_only: bool = False, max_new_tokens: int = 2048) -> Tuple[Dict[str, Any]]:
         if ref_audio is None:
             raise RuntimeError("Reference audio is required")
-        
-        # Load model
-        model = load_qwen_model("Base", model_choice, device, precision)
+
+        # Map language before loading model
+        mapped_lang = LANGUAGE_MAP.get(language, "english")
+
+        # Load model with language parameter (SOLUTION 2)
+        model = load_qwen_model("Base", model_choice, device, precision, mapped_lang)
 
         # Set random seeds
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-            if hasattr(torch, 'xpu') and torch.xpu.is_available():
-                torch.xpu.manual_seed_all(seed)
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            torch.xpu.manual_seed_all(seed)
         import numpy as np
         np.random.seed(seed % (2**32))
-        
+
         audio_tuple = None
         if isinstance(ref_audio, dict):
             audio_tuple = self._audio_tensor_to_tuple(ref_audio)
@@ -487,6 +510,7 @@ class VoiceCloneNode:
 
         # Monkeypatch model._normalize_audio_inputs to return mutable lists to avoid upstream tuple assignment bug
         orig_normalize = getattr(model, "_normalize_audio_inputs", None)
+
         def _safe_normalize(self, audios):
             # Adapted from upstream but returns list entries as lists [waveform, sr]
             if isinstance(audios, list):
@@ -511,6 +535,7 @@ class VoiceCloneNode:
                 wav, sr = out[i][0], out[i][1]
                 if wav.ndim > 1:
                     out[i][0] = np.mean(wav, axis=-1).astype(np.float32)
+
             return out
 
         if orig_normalize is not None:
@@ -520,7 +545,6 @@ class VoiceCloneNode:
                 pass
 
         try:
-            mapped_lang = LANGUAGE_MAP.get(language, "auto")
             wavs, sr = model.generate_voice_clone(
                 text=target_text,
                 language=mapped_lang,
@@ -539,14 +563,17 @@ class VoiceCloneNode:
 
         if isinstance(wavs, list) and len(wavs) > 0:
             waveform = torch.from_numpy(wavs[0]).float()
+
             # Ensure waveform is 1D [samples]
             if waveform.ndim > 1:
                 waveform = waveform.squeeze()
+
             # Convert to ComfyUI format: [batch, channels, samples]
             waveform = waveform.unsqueeze(0).unsqueeze(0)
             audio_data = {"waveform": waveform, "sample_rate": sr}
             return (audio_data,)
-        
+
+        raise RuntimeError("Invalid audio data generated")
 
 
 class CustomVoiceNode:
@@ -563,7 +590,7 @@ class CustomVoiceNode:
                 "model_choice": (["0.6B", "1.7B"], {"default": "1.7B"}),
                 "device": (["auto", "cuda", "mps", "xpu", "cpu"], {"default": "auto"}),
                 "precision": (["bf16", "fp32"], {"default": "bf16"}),
-                "language": (DEMO_LANGUAGES, {"default": "Auto"}),
+                "language": (DEMO_LANGUAGES, {"default": "English"}),
             },
             "optional": {
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
@@ -581,20 +608,22 @@ class CustomVoiceNode:
     def generate(self, text: str, speaker: str, model_choice: str, device: str, precision: str, language: str, seed: int = 0, instruct: str = "", max_new_tokens: int = 2048) -> Tuple[Dict[str, Any]]:
         if not text or not speaker:
             raise RuntimeError("Text and speaker are required")
-        
-        # Load model
-        model = load_qwen_model("CustomVoice", model_choice, device, precision)
+
+        # Map language before loading model
+        mapped_lang = LANGUAGE_MAP.get(language, "english")
+
+        # Load model with language parameter (SOLUTION 2)
+        model = load_qwen_model("CustomVoice", model_choice, device, precision, mapped_lang)
 
         # Set random seeds
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-            if hasattr(torch, 'xpu') and torch.xpu.is_available():
-                torch.xpu.manual_seed_all(seed)
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            torch.xpu.manual_seed_all(seed)
         import numpy as np
         np.random.seed(seed % (2**32))
 
-        mapped_lang = LANGUAGE_MAP.get(language, "auto")
         wavs, sr = model.generate_custom_voice(
             text=text,
             language=mapped_lang,
@@ -605,11 +634,14 @@ class CustomVoiceNode:
 
         if isinstance(wavs, list) and len(wavs) > 0:
             waveform = torch.from_numpy(wavs[0]).float()
+
             # Ensure waveform is 1D [samples]
             if waveform.ndim > 1:
                 waveform = waveform.squeeze()
+
             # Convert to ComfyUI format: [batch, channels, samples]
             waveform = waveform.unsqueeze(0).unsqueeze(0)
             audio_data = {"waveform": waveform, "sample_rate": sr}
             return (audio_data,)
+
         raise RuntimeError("Invalid audio data generated")
