@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-simple-qwen3-tts"
 description = "High-quality Text-to-Speech nodes for ComfyUI using Qwen3-TTS models. Supports voice cloning, voice design, and custom voices with Intel Arc XPU optimization."
-version = "1.2.0"
+version = "1.2.1"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 dependencies = []
