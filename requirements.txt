@@ -9,6 +9,8 @@ numpy>=1.24.0
 einops>=0.6.0
 tiktoken>=0.5.0
 sentencepiece>=0.1.99
+onnxruntime
+sox
 
 # For model downloads
 huggingface-hub>=0.16.0
