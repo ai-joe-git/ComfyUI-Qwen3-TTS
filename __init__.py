@@ -32,7 +32,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 }
 
 # Version information
-__version__ = "1.2.3"
+__version__ = "1.2.5"
 
 # Web directory for custom UI components (if any)
 WEB_DIRECTORY = "./web"
