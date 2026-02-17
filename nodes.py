@@ -13,6 +13,10 @@ import types
 from comfy import model_management
 from comfy.utils import ProgressBar
 
+from qwen_tts.core.rope_compat import patch_rope_default_if_missing
+patch_rope_default_if_missing()
+
+
 # Optional Intel Extension for PyTorch support
 try:
     import intel_extension_for_pytorch as ipex
@@ -254,31 +258,42 @@ def apply_qwen3_patches(model):
         print(f"⚠️ [Qwen3-TTS] Failed to apply audio normalization patch: {e}")
 
 
-def download_model_if_needed(model_id: str, qwen_root: str) -> Optional[str]:
-    """Download a specific model if not found locally."""
-    folder_name = model_id.split("/")[-1]
-    target_dir = os.path.join(qwen_root, folder_name)
+def download_model_if_needed(model_id: str, target_dir: str) -> str | None:
+    """Offline-first: only use local files.
 
-    if os.path.exists(target_dir) and os.path.isdir(target_dir):
+    If QWEN_TTS_ALLOW_DOWNLOAD=1 is set, we'll allow HuggingFace downloads as a fallback.
+    Otherwise we *never* download and we return None when the folder doesn't exist.
+    """
+    # If user explicitly allows downloads, keep the old behavior (snapshot_download).
+    allow_dl = os.environ.get("QWEN_TTS_ALLOW_DOWNLOAD", "").strip() in ("1", "true", "True", "yes", "YES")
+    if os.path.isdir(target_dir):
         return target_dir
 
-    print(f"\n📥 [Qwen3-TTS] Downloading {model_id}...")
+    if not allow_dl:
+        # Offline mode: don't create folders, don't download anything.
+        print(f"🛑 [Qwen3-TTS] Offline mode: refusing to download '{model_id}'. Missing folder: {target_dir}")
+        return None
+
+    # ---- Online fallback (only when explicitly enabled) ----
+    print(f"⬇️ [Qwen3-TTS] Downloading '{model_id}' to: {target_dir}")
+    os.makedirs(target_dir, exist_ok=True)
     try:
-        from huggingface_hub import snapshot_download
-
-        snapshot_download(repo_id=model_id, local_dir=target_dir)
-        print(f"✅ [Qwen3-TTS] {folder_name} downloaded successfully.\n")
+        snapshot_download(
+            repo_id=model_id,
+            local_dir=target_dir,
+            local_dir_use_symlinks=False,
+        )
         return target_dir
-    except ImportError:
-        print("⚠️ [Qwen3-TTS] 'huggingface_hub' not found. Please install it to use auto-download.")
-        return None
     except Exception as e:
-        print(f"❌ [Qwen3-TTS] Failed to download {model_id}: {e}")
+        print(f"❌ [Qwen3-TTS] Download failed for '{model_id}': {e}")
         return None
-
 
 def check_and_download_tokenizer():
-    """Check and download tokenizer (shared by all models)."""
+    """Offline-first tokenizer check.
+
+    We do **not** download anything here. We only verify that a local tokenizer folder exists.
+    If it doesn't, we'll warn (and model loading may fail later).
+    """
     global _MODELS_CHECKED
     if _MODELS_CHECKED:
         return
@@ -286,13 +301,18 @@ def check_and_download_tokenizer():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     comfy_models_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "models")
     qwen_root = os.path.join(comfy_models_path, "qwen-tts")
-    os.makedirs(qwen_root, exist_ok=True)
 
-    tokenizer_id = "Qwen/Qwen3-TTS-Tokenizer-12Hz"
-    download_model_if_needed(tokenizer_id, qwen_root)
+    # Common local tokenizer folder name
+    local_tok = os.path.join(qwen_root, "Qwen3-TTS-Tokenizer-12Hz")
+    if os.path.isdir(local_tok):
+        # Great — fully local.
+        _MODELS_CHECKED = True
+        return
 
+    # Some users store tokenizer inside the model folder; in that case, we don't need anything here.
+    print(f"⚠️ [Qwen3-TTS] Local tokenizer folder not found at: {local_tok}")
+    print("⚠️ [Qwen3-TTS] Offline mode: no tokenizer will be downloaded. If generation fails, place the tokenizer folder there.")
     _MODELS_CHECKED = True
-
 
 def load_qwen_model(
     model_type: str,
@@ -451,7 +471,7 @@ def load_qwen_model(
             from sageattention import sageattn
 
             print("🔧 [Qwen3-TTS] Loading model with sage_attn (sageattention)")
-            model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype)
+            model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype, local_files_only=True)
 
             patched_count = 0
             for name, module in model.model.named_modules():
@@ -482,19 +502,18 @@ def load_qwen_model(
             print(f"🔧 [Qwen3-TTS] Patched {patched_count} attention modules with sage_attn")
         except (ImportError, Exception) as e:
             print(f"⚠️ [Qwen3-TTS] Failed with sage_attn, falling back to default attention: {e}")
-            model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype)
+            model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype, local_files_only=True)
     else:
         try:
             print(f"🔧 [Qwen3-TTS] Loading model with attention: {attn_impl}")
             if attn_param:
                 model = Qwen3TTSModel.from_pretrained(
-                    final_source, device_map=device, dtype=dtype, attn_implementation=attn_param
-                )
+                    final_source, device_map=device, dtype=dtype, attn_implementation=attn_param, local_files_only=True)
             else:
-                model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype)
+                model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype, local_files_only=True)
         except (ImportError, ValueError, Exception) as e:
             print(f"⚠️ [Qwen3-TTS] Failed with {attn_impl}, falling back to default attention: {e}")
-            model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype)
+            model = Qwen3TTSModel.from_pretrained(final_source, device_map=device, dtype=dtype, local_files_only=True)
 
     apply_qwen3_patches(model)
     _MODEL_CACHE[cache_key] = model
@@ -525,7 +544,7 @@ class VoiceDesignNode:
             },
             "optional": {
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
-                "max_new_tokens": ("INT", {"default": 2048, "min": 512, "max": 4096, "step": 256}),
+                "max_new_tokens": ("INT", {"default": 2048, "min": 512, "max": 32768, "step": 256}),
                 "top_p": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "top_k": ("INT", {"default": 20, "min": 0, "max": 100, "step": 1}),
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 2.0, "step": 0.1}),
@@ -639,7 +658,7 @@ class VoiceCloneNode:
                 "ref_text": ("STRING", {"multiline": True, "default": "", "placeholder": "Reference audio text (optional)"}),
                 "voice_clone_prompt": ("VOICE_CLONE_PROMPT", {"tooltip": "Reusable voice clone prompt"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
-                "max_new_tokens": ("INT", {"default": 2048, "min": 512, "max": 4096, "step": 256}),
+                "max_new_tokens": ("INT", {"default": 2048, "min": 512, "max": 32768, "step": 256}),
                 "top_p": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "top_k": ("INT", {"default": 20, "min": 0, "max": 100, "step": 1}),
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 2.0, "step": 0.1}),
@@ -834,7 +853,7 @@ class CustomVoiceNode:
             "optional": {
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
                 "instruct": ("STRING", {"multiline": True, "default": "", "placeholder": "Style instruction (optional)"}),
-                "max_new_tokens": ("INT", {"default": 2048, "min": 512, "max": 4096, "step": 256}),
+                "max_new_tokens": ("INT", {"default": 2048, "min": 512, "max": 32768, "step": 256}),
                 "top_p": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "top_k": ("INT", {"default": 20, "min": 0, "max": 100, "step": 1}),
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 2.0, "step": 0.1}),
@@ -1071,7 +1090,7 @@ class DialogueInferenceNode:
             },
             "optional": {
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
-                "max_new_tokens_per_line": ("INT", {"default": 2048, "min": 512, "max": 4096, "step": 256}),
+                "max_new_tokens_per_line": ("INT", {"default": 2048, "min": 512, "max": 32768, "step": 256}),
                 "top_p": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "top_k": ("INT", {"default": 20, "min": 0, "max": 100, "step": 1}),
                 "temperature": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 2.0, "step": 0.1}),

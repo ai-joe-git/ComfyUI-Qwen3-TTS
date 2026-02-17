@@ -1977,7 +1977,7 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
         languages: list[str] = None,
         speakers: list[str] = None,
         non_streaming_mode = False,
-        max_new_tokens: int = 4096,
+        max_new_tokens: int = 32768,
         do_sample: bool = True,
         top_k: int = 50,
         top_p: float = 1.0,
